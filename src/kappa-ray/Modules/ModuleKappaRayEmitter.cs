@@ -50,13 +50,7 @@ namespace kapparay.Modules
         {
             RadiationTracker rt = Core.Instance.getRT(vessel);
             double energy = 180.0 + Core.Instance.mRandom.NextDouble() * 400.0; // slightly higher energy than solar
-            Vector3 aimDir = rt.randomVector(1.0f);
-            #if VERYDEBUG
-            Logging.Log(String.Format("Emitter casting ray from {0} along {1}, e={2:F3}", part.partTransform.position, aimDir, energy), false);
-            #endif
-            List<RaycastHit> hits = new List<RaycastHit>(Physics.RaycastAll(part.partTransform.position, aimDir, 2e4f));
-
-            rt.IrradiateList(count, energy, hits);
+            rt.IrradiateFromPart(count, energy, part);
         }
 
         public override void OnFixedUpdate()
@@ -69,7 +63,7 @@ namespace kapparay.Modules
                     ModuleEngines e = part.FindModuleImplementing<ModuleEngines>();
                     if (e.isOperational)
                     {
-                        double strength = throttleCoeff * e.requestedThrottle;
+                        double strength = throttleCoeff * e.requestedThrottle * 100.0;
                         Irradiate(strength);
                     }
                 }
@@ -79,7 +73,7 @@ namespace kapparay.Modules
 
         public override string GetInfo()
         {
-            return String.Format("Emits {0:G} per throttle %", throttleCoeff);
+            return String.Format("Emits {0:G} per throttle %", throttleCoeff * 100.0);
         }
     }
 }

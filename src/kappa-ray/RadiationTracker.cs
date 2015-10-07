@@ -101,7 +101,7 @@ namespace kapparay
         }
     }
 
-    public class RadiationTracker : MonoBehaviour
+    public class RadiationTracker : MonoBehaviour, IRadiationTracker
     {
         private Vessel mVessel;
 
@@ -153,15 +153,21 @@ namespace kapparay
             lastG = galactic * 0.05;
         }
 
-        public Vector3 randomVector(float length)
+        public Vector3 randomVector()
         {
             Vector3 v = new Vector3((float)(Core.Instance.mRandom.NextDouble() - 0.5),
                                     (float)(Core.Instance.mRandom.NextDouble() - 0.5),
                                     (float)(Core.Instance.mRandom.NextDouble() - 0.5));
             if (v.magnitude < 1e-6) // very unlikely
                 v = Vector3.up;
-            Vector3 mag = new Vector3(length, length, length);
             v.Normalize();
+            return v;
+        }
+
+        public Vector3 randomVector(float length)
+        {
+            Vector3 v = randomVector();
+            Vector3 mag = new Vector3(length, length, length);
             v.Scale(mag);
             return v;
         }
@@ -197,7 +203,7 @@ namespace kapparay
         private void IrradiateOnce(int count, RadiationSource source)
         {
             Vector3 aimPt = mVessel.CurrentCoM + randomVector(10.0f);
-            Vector3 aimDir = randomVector(1e4f);
+            Vector3 aimDir = randomVector();
             double energy = 0;
             switch (source)
             {
@@ -207,24 +213,28 @@ namespace kapparay
                 case RadiationSource.Solar: // medium-energy
                     energy = 120.0 + Core.Instance.mRandom.NextDouble() * 300.0;
                     aimDir = Sun.Instance.sunDirection;
-                    aimDir.Normalize();
-                    aimDir.Scale(new Vector3(1e4f, 1e4f, 1e4f));
                     break;
                 case RadiationSource.Galactic: // high-energy
                     energy = (1.0 - 4.0 * Math.Log(Core.Instance.mRandom.NextDouble())) * 300.0;
                     break;
             }
 
-            #if VERYDEBUG
-            Logging.Log(String.Format("Casting ray at {0} from {1}, e={2:F3}", aimPt, -aimDir, energy), false);
-            #endif
+            IrradiateVector(count, energy, aimPt - aimDir * 1e4f, aimDir);
+        }
 
-            List<RaycastHit> hits = new List<RaycastHit>(Physics.RaycastAll(aimPt - aimDir, aimDir, 2e4f));
+        public void IrradiateFromPart(int count, double energy, Part p)
+        {
+            IrradiateVector(count, energy, p.partTransform.position, randomVector());
+        }
+
+        public void IrradiateVector(int count, double energy, Vector3 from, Vector3 dir)
+        {
+            List<RaycastHit> hits = new List<RaycastHit>(Physics.RaycastAll(from, dir, 2e4f));
 
             IrradiateList(count, energy, hits);
         }
 
-        public void IrradiateList(int count, double energy, List<RaycastHit> hits)
+        private void IrradiateList(int count, double energy, List<RaycastHit> hits)
         {
             hits.Sort(RaycastSorter);
 
@@ -241,11 +251,18 @@ namespace kapparay
                         if (count == 0) break;
                         count = h.OnRadiation(energy, count, Core.Instance.mRandom);
                     }
-                    if (count > 0 && !hasModule)
+                    if (count > 0)
                     {
-                        double totalMass = p.mass + p.GetResourceMass();
-                        double absorpCoeff = (1.0 - Math.Exp(-totalMass / 2.0)) / 2.0;
-                        int absorbs = Modules.ModuleKappaRayAbsorber.absorbCount(count, absorpCoeff);
+                        double negAbsorpCoeff = hasModule ? 1.0 : Math.Exp(-Math.Pow(p.mass, 1/3.0) / 8.0); // implicit resAbsCe of 0.125 for structure, assuming density of 1
+                        foreach (PartResource pr in p.Resources)
+                        {
+                            if (Core.Instance.resAbsCe.ContainsKey(pr.resourceName))
+                            {
+                                double nrac = Math.Exp(-Math.Pow(pr.amount, 1/3.0) * pr.info.density * Core.Instance.resAbsCe[pr.resourceName]);
+                                negAbsorpCoeff *= nrac;
+                            }
+                        }
+                        int absorbs = Modules.ModuleKappaRayAbsorber.absorbCount(count, 1.0 - negAbsorpCoeff);
                         #if QUITEDEBUG
                         Logging.Log(String.Format("{0} struck by {1:D} rays of energy {2:G}, {3:D} absorbed", p.partInfo.title, count, energy, absorbs), false);
                         #endif
